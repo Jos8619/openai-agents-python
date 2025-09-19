@@ -180,7 +180,7 @@ class RunResultStreaming(RunResultBase):
         if self._trace:
             self._trace.finish(reset_current=True)
 
-        self._cleanup_tasks()
+        await self._cleanup_tasks()
 
         if self._stored_exception:
             raise self._stored_exception
@@ -211,15 +211,24 @@ class RunResultStreaming(RunResultBase):
             if exc and isinstance(exc, Exception):
                 self._stored_exception = exc
 
-    def _cleanup_tasks(self):
-        if self._run_impl_task and not self._run_impl_task.done():
-            self._run_impl_task.cancel()
+    async def _cleanup_tasks(self):
+        tasks: list[asyncio.Task[Any]] = []
 
-        if self._input_guardrails_task and not self._input_guardrails_task.done():
-            self._input_guardrails_task.cancel()
+        for task in (
+            self._run_impl_task,
+            self._input_guardrails_task,
+            self._output_guardrails_task,
+        ):
+            if task is None:
+                continue
 
-        if self._output_guardrails_task and not self._output_guardrails_task.done():
-            self._output_guardrails_task.cancel()
+            if not task.done():
+                task.cancel()
+
+            tasks.append(task)
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def __str__(self) -> str:
         return pretty_print_run_result_streaming(self)

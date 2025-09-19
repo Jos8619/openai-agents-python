@@ -225,10 +225,11 @@ class Agent(Generic[TContext]):
         if isinstance(self.instructions, str):
             return self.instructions
         elif callable(self.instructions):
-            if inspect.iscoroutinefunction(self.instructions):
-                return await cast(Awaitable[str], self.instructions(run_context, self))
-            else:
-                return cast(str, self.instructions(run_context, self))
+            instructions_result = self.instructions(run_context, self)
+            if inspect.isawaitable(instructions_result):
+                return await cast(Awaitable[str | None], instructions_result)
+
+            return cast(str | None, instructions_result)
         elif self.instructions is not None:
             logger.error(f"Instructions must be a string or a function, got {self.instructions}")
 
