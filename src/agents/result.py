@@ -153,34 +153,36 @@ class RunResultStreaming(RunResultBase):
         - A MaxTurnsExceeded exception if the agent exceeds the max_turns limit.
         - A GuardrailTripwireTriggered exception if a guardrail is tripped.
         """
-        while True:
-            self._check_errors()
-            if self._stored_exception:
-                logger.debug("Breaking due to stored exception")
-                self.is_complete = True
-                break
-
-            if self.is_complete and self._event_queue.empty():
-                break
-
-            try:
-                item = await self._event_queue.get()
-            except asyncio.CancelledError:
-                break
-
-            if isinstance(item, QueueCompleteSentinel):
-                self._event_queue.task_done()
-                # Check for errors, in case the queue was completed due to an exception
+        try:
+            while True:
                 self._check_errors()
-                break
+                if self._stored_exception:
+                    logger.debug("Breaking due to stored exception")
+                    self.is_complete = True
+                    break
 
-            yield item
-            self._event_queue.task_done()
+                if self.is_complete and self._event_queue.empty():
+                    break
 
-        if self._trace:
-            self._trace.finish(reset_current=True)
+                try:
+                    item = await self._event_queue.get()
+                except asyncio.CancelledError:
+                    break
 
-        await self._cleanup_tasks()
+                if isinstance(item, QueueCompleteSentinel):
+                    self._event_queue.task_done()
+                    # Check for errors, in case the queue was completed due to an exception
+                    self._check_errors()
+                    break
+
+                yield item
+                self._event_queue.task_done()
+        finally:
+            if self._trace:
+                self._trace.finish(reset_current=True)
+                self._trace = None
+
+            await self._cleanup_tasks()
 
         if self._stored_exception:
             raise self._stored_exception
@@ -214,11 +216,12 @@ class RunResultStreaming(RunResultBase):
     async def _cleanup_tasks(self):
         tasks: list[asyncio.Task[Any]] = []
 
-        for task in (
-            self._run_impl_task,
-            self._input_guardrails_task,
-            self._output_guardrails_task,
+        for attr_name in (
+            "_run_impl_task",
+            "_input_guardrails_task",
+            "_output_guardrails_task",
         ):
+            task = getattr(self, attr_name)
             if task is None:
                 continue
 
@@ -227,8 +230,18 @@ class RunResultStreaming(RunResultBase):
 
             tasks.append(task)
 
+            setattr(self, attr_name, None)
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def aclose(self) -> None:
+        """Cancel background tasks and finish tracing without consuming the event stream."""
+        if self._trace:
+            self._trace.finish(reset_current=True)
+            self._trace = None
+
+        await self._cleanup_tasks()
 
     def __str__(self) -> str:
         return pretty_print_run_result_streaming(self)
