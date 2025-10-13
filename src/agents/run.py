@@ -324,7 +324,18 @@ class Runner:
             A run result containing all the inputs, guardrail results and the output of the last
             agent. Agents may perform handoffs, so we don't know the specific type of the output.
         """
-        return asyncio.get_event_loop().run_until_complete(
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is not None:
+            raise AgentsException(
+                "Runner.run_sync() cannot be used when an event loop is already running. "
+                "Use Runner.run() instead."
+            )
+
+        return asyncio.run(
             cls.run(
                 starting_agent,
                 input,

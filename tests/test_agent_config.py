@@ -1,3 +1,5 @@
+import functools
+
 import pytest
 from pydantic import BaseModel
 
@@ -25,6 +27,17 @@ async def test_system_instructions():
 
     agent = agent.clone(instructions=async_instructions)
     assert await agent.get_system_prompt(context) == "async_123"
+
+    partial_async = functools.partial(async_instructions)
+    agent = agent.clone(instructions=partial_async)
+    assert await agent.get_system_prompt(context) == "async_123"
+
+    class AsyncCallable:
+        async def __call__(self, agent: Agent[None], context: RunContextWrapper[None]) -> str:
+            return "callable_123"
+
+    agent = agent.clone(instructions=AsyncCallable())
+    assert await agent.get_system_prompt(context) == "callable_123"
 
 
 @pytest.mark.asyncio
